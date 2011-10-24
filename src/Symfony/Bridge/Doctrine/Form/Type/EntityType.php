@@ -19,6 +19,10 @@ use Symfony\Bridge\Doctrine\Form\EventListener\MergeCollectionListener;
 use Symfony\Bridge\Doctrine\Form\DataTransformer\EntitiesToArrayTransformer;
 use Symfony\Bridge\Doctrine\Form\DataTransformer\EntityToIdTransformer;
 use Symfony\Component\Form\AbstractType;
+use Symfony\Component\Form\FormInterface;
+use Symfony\Component\Form\FormView;
+use Symfony\Component\Form\Util\PropertyPath;
+use Symfony\Component\Form\Exception\UnexpectedTypeException;
 
 class EntityType extends AbstractType
 {
@@ -31,6 +35,8 @@ class EntityType extends AbstractType
 
     public function buildForm(FormBuilder $builder, array $options)
     {
+        $builder->setAttribute('group_by', $options['group_by']);
+
         if ($options['multiple']) {
             $builder
                 ->addEventSubscriber(new MergeCollectionListener())
@@ -38,6 +44,39 @@ class EntityType extends AbstractType
             ;
         } else {
             $builder->prependClientTransformer(new EntityToIdTransformer($options['choice_list']));
+        }
+    }
+
+    public function buildView(FormView $view, FormInterface $form)
+    {
+        if (null !== $form->getAttribute('group_by')) {
+            $groupBy    = $form->getAttribute('group_by');
+            $list       = $form->getAttribute('choice_list');
+            $flattened  = $view->get('choices');
+            $nested     = array();
+
+            foreach ($flattened as $key => $label) {
+                $entity = $list->getEntity($key);
+
+                if ($groupBy instanceof \Closure) {
+                    $group = $groupBy($entity);
+                } else {
+                    try {
+                        $path   = new PropertyPath($groupBy);
+                        $group  = (String) $path->getValue($entity);
+                    } catch (UnexpectedTypeException $e) {
+                        // PropertyPath cannot traverse entity
+                    }
+                }
+
+                if (empty($group)) {
+                    $nested[$key] = $label;
+                } else {
+                    $nested[$group][$key] = $label;
+                }
+            }
+
+            $view->set('choices', $nested);
         }
     }
 
@@ -49,6 +88,7 @@ class EntityType extends AbstractType
             'property'          => null,
             'query_builder'     => null,
             'choices'           => array(),
+            'group_by'          => null,
         );
 
         $options = array_replace($defaultOptions, $options);
